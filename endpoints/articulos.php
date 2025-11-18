@@ -1,172 +1,184 @@
 <?php
-// Archivo: endpoints/articulos.php
+use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 
-// 1. Headers del API (ESENCIALES)
-header("Access-Control-Allow-Origin: *");
-header("Content-Type: application/json; charset=UTF-8");
-header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS"); // Métodos CRUD completos
-header("Access-Control-Max-Age: 3600");
-header("Access-Control-Allow-Headers: Content-Type, Access-Control-Allow-Headers, Authorization, X-Requested-With");
-
-// 2. Manejar la solicitud OPTIONS
-if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
-    http_response_code(200);
-    exit();
-}
-
-// 3. Incluir la conexión a la Base de Datos
+require_once '../vendor/autoload.php';
 include_once '../config/Database.php';
 
-$database = new Database();
-$db = $database->getConnection();
+// ✅ إعدادات CORS
+$allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:3002',
+  'http://localhost:3003',
+  'http://192.168.1.237:3000'
+];
 
-// 4. Determinar el método de la solicitud
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if (in_array($origin, $allowedOrigins)) {
+  header("Access-Control-Allow-Origin: $origin");
+}
+header("Content-Type: application/json; charset=UTF-8");
+header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
+header("Access-Control-Max-Age: 3600");
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+  http_response_code(200);
+  exit();
+}
+
+// ✅ التحقق من التوكن JWT بطريقة موحدة
+function obtenerToken($secretKey) {
+  $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+  if (!$authHeader) {
+    $headers = getallheaders();
+    $authHeader = $headers['Authorization'] ?? '';
+  }
+
+  if (!$authHeader || !str_starts_with($authHeader, 'Bearer ')) {
+    http_response_code(401);
+    echo json_encode(["status" => "error", "message" => "Token no proporcionado"]);
+    exit();
+  }
+
+  $jwt = str_replace('Bearer ', '', $authHeader);
+
+  try {
+    $decoded = JWT::decode($jwt, new Key($secretKey, 'HS256'));
+    return $decoded->data;
+  } catch (Exception $e) {
+    http_response_code(401);
+    echo json_encode(["status" => "error", "message" => "Token inválido"]);
+    exit();
+  }
+}
+
+$secretKey = "Samihaynesprohackersluxury@1996*";
+$usuarioToken = obtenerToken($secretKey);
+
+// ✅ الاتصال بقاعدة البيانات
+$db = (new Database())->getConnection();
+
+// ✅ تحديد نوع الطلب
 $method = $_SERVER['REQUEST_METHOD'];
-
-// 5. Leer los datos JSON (para POST y PUT)
 $data = json_decode(file_get_contents("php://input"));
-
-// 6. Leer los IDs de la URL (para GET, PUT y DELETE)
-$id_articulo = isset($_GET['id_articulo']) ? $_GET['id_articulo'] : null;
-
-// TODO: Aquí debería ir la lógica para verificar el Token JWT
-// y asegurarse de que el rol es 'admin' para POST, PUT y DELETE.
-// $id_admin_token = 1; // ID de admin (ejemplo hardcodeado)
-
+$id_articulo = $_GET['id_articulo'] ?? null;
 
 switch ($method) {
-    // ===================================
-    // CASO 1: Listar Artículos (Método GET)
-    // ===================================
-    case 'GET':
-        // Si nos dan un ID, devolvemos solo ese artículo
-        if ($id_articulo) {
-            $query = "SELECT a.*, u.nombre_usuario AS nombre_admin 
-                      FROM Articulos a 
-                      JOIN Usuarios u ON a.id_admin = u.id_usuario
-                      WHERE a.id_articulo = :id_articulo";
-            $stmt = $db->prepare($query);
-            $stmt->bindParam(':id_articulo', $id_articulo);
-        } else {
-            // Si no, los listamos todos
-            $query = "SELECT a.*, u.nombre_usuario AS nombre_admin 
-                      FROM Articulos a 
-                      JOIN Usuarios u ON a.id_admin = u.id_usuario
-                      ORDER BY a.fecha_creacion DESC";
-            $stmt = $db->prepare($query);
-        }
-        
-        $stmt->execute();
-        $articulos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+  case 'GET':
+    if ($id_articulo) {
+      $query = "SELECT a.*, u.nombre_usuario AS nombre_admin
+                FROM articulos a
+                JOIN usuarios u ON a.id_admin = u.id_usuario
+                WHERE a.id_articulo = :id_articulo";
+      $stmt = $db->prepare($query);
+      $stmt->bindParam(':id_articulo', $id_articulo);
+    } else {
+      $query = "SELECT a.*, u.nombre_usuario AS nombre_admin
+                FROM articulos a
+                JOIN usuarios u ON a.id_admin = u.id_usuario
+                ORDER BY a.fecha_publicacion DESC";
+      $stmt = $db->prepare($query);
+    }
 
-        if ($articulos) {
-            http_response_code(200); // OK
-            echo json_encode($articulos);
-        } else {
-            http_response_code(404); // Not Found
-            echo json_encode(array("message" => "No se encontraron artículos."));
-        }
-        break;
+    $stmt->execute();
+    $articulos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // ===================================
-    // CASO 2: Crear Artículo (Método POST)
-    // ===================================
-    case 'POST':
-        // TODO: Verificar que el $id_admin_token tiene rol 'admin'
+    if ($articulos) {
+      http_response_code(200);
+      echo json_encode($articulos);
+    } else {
+      http_response_code(404);
+      echo json_encode(["status" => "error", "message" => "No se encontraron artículos."]);
+    }
+    break;
 
-        if (
-            !empty($data->id_admin) && // (Temporalmente, React envía el ID del admin)
-            !empty($data->titulo_articulo) &&
-            !empty($data->contenido)
-        ) {
-            $query = "INSERT INTO Articulos (id_admin, titulo_articulo, contenido, categoria_articulo)
-                      VALUES (:id_admin, :titulo, :contenido, :categoria)";
-            
-            $stmt = $db->prepare($query);
+  case 'POST':
+    if (
+      isset($data->titulo_articulo) && trim($data->titulo_articulo) !== '' &&
+      isset($data->contenido) && trim($data->contenido) !== '' &&
+      isset($data->categoria_articulo) && trim($data->categoria_articulo) !== ''
+    ) {
+      $query = "INSERT INTO articulos (id_admin, titulo_articulo, contenido, categoria_articulo, fecha_publicacion)
+                VALUES (:id_admin, :titulo, :contenido, :categoria, NOW())";
+      $stmt = $db->prepare($query);
+      $stmt->bindParam(':id_admin', $usuarioToken->id);
+      $stmt->bindParam(':titulo', $data->titulo_articulo);
+      $stmt->bindParam(':contenido', $data->contenido);
+      $stmt->bindParam(':categoria', $data->categoria_articulo);
 
-            $stmt->bindParam(':id_admin', $data->id_admin); // Debería ser $id_admin_token
-            $stmt->bindParam(':titulo', $data->titulo_articulo);
-            $stmt->bindParam(':contenido', $data->contenido);
-            $stmt->bindParam(':categoria', $data->categoria_articulo);
+      if ($stmt->execute()) {
+        $id_nuevo = $db->lastInsertId();
+        http_response_code(201);
+        echo json_encode([
+          "status" => "success",
+          "message" => "Artículo creado exitosamente.",
+          "id_articulo" => $id_nuevo
+        ]);
+      } else {
+        http_response_code(503);
+        echo json_encode(["status" => "error", "message" => "No se pudo crear el artículo."]);
+      }
+    } else {
+      http_response_code(400);
+      echo json_encode(["status" => "error", "message" => "Datos incompletos."]);
+    }
+    break;
 
-            if ($stmt->execute()) {
-                http_response_code(201); // Creado
-                echo json_encode(array("message" => "Artículo creado exitosamente."));
-            } else {
-                http_response_code(503);
-                echo json_encode(array("message" => "No se pudo crear el artículo."));
-            }
-        } else {
-            http_response_code(400);
-            echo json_encode(array("message" => "Datos incompletos."));
-        }
-        break;
+  case 'PUT':
+    if (
+      $id_articulo &&
+      isset($data->titulo_articulo) && trim($data->titulo_articulo) !== '' &&
+      isset($data->contenido) && trim($data->contenido) !== '' &&
+      isset($data->categoria_articulo)
+    ) {
+      $query = "UPDATE articulos
+                SET titulo_articulo = :titulo,
+                    contenido = :contenido,
+                    categoria_articulo = :categoria
+                WHERE id_articulo = :id_articulo";
+      $stmt = $db->prepare($query);
+      $stmt->bindParam(':titulo', $data->titulo_articulo);
+      $stmt->bindParam(':contenido', $data->contenido);
+      $stmt->bindParam(':categoria', $data->categoria_articulo);
+      $stmt->bindParam(':id_articulo', $id_articulo);
 
-    // ===================================
-    // CASO 3: Actualizar Artículo (Método PUT)
-    // ===================================
-    case 'PUT':
-        // TODO: Verificar que el $id_admin_token tiene rol 'admin'
-        
-        // Necesitamos el ID del artículo (de la URL) y los datos (del JSON)
-        if ($id_articulo && !empty($data->titulo_articulo) && !empty($data->contenido)) {
-            
-            $query = "UPDATE Articulos 
-                      SET titulo_articulo = :titulo, 
-                          contenido = :contenido, 
-                          categoria_articulo = :categoria
-                      WHERE id_articulo = :id_articulo";
+      if ($stmt->execute()) {
+        http_response_code(200);
+        echo json_encode(["status" => "success", "message" => "Artículo actualizado."]);
+      } else {
+        http_response_code(503);
+        echo json_encode(["status" => "error", "message" => "No se pudo actualizar el artículo."]);
+      }
+    } else {
+      http_response_code(400);
+      echo json_encode(["status" => "error", "message" => "Falta el ID del artículo o datos incompletos."]);
+    }
+    break;
 
-            $stmt = $db->prepare($query);
+  case 'DELETE':
+    if ($id_articulo) {
+      $query = "DELETE FROM articulos WHERE id_articulo = :id_articulo";
+      $stmt = $db->prepare($query);
+      $stmt->bindParam(':id_articulo', $id_articulo);
 
-            $stmt->bindParam(':titulo', $data->titulo_articulo);
-            $stmt->bindParam(':contenido', $data->contenido);
-            $stmt->bindParam(':categoria', $data->categoria_articulo);
-            $stmt->bindParam(':id_articulo', $id_articulo);
+      if ($stmt->execute()) {
+        http_response_code(200);
+        echo json_encode(["status" => "success", "message" => "Artículo eliminado."]);
+      } else {
+        http_response_code(503);
+        echo json_encode(["status" => "error", "message" => "No se pudo eliminar el artículo."]);
+      }
+    } else {
+      http_response_code(400);
+      echo json_encode(["status" => "error", "message" => "Falta el ID del artículo en la URL."]);
+    }
+    break;
 
-            if ($stmt->execute()) {
-                http_response_code(200); // OK
-                echo json_encode(array("message" => "Artículo actualizado."));
-            } else {
-                http_response_code(503);
-                echo json_encode(array("message" => "No se pudo actualizar el artículo."));
-            }
-        } else {
-            http_response_code(400);
-            echo json_encode(array("message" => "Falta el ID del artículo o datos incompletos."));
-        }
-        break;
-
-    // ===================================
-    // CASO 4: Borrar Artículo (Método DELETE)
-    // ===================================
-    case 'DELETE':
-        // TODO: Verificar que el $id_admin_token tiene rol 'admin'
-        
-        if ($id_articulo) {
-            $query = "DELETE FROM Articulos WHERE id_articulo = :id_articulo";
-            $stmt = $db->prepare($query);
-            $stmt->bindParam(':id_articulo', $id_articulo);
-
-            if ($stmt->execute()) {
-                http_response_code(200); // OK
-                echo json_encode(array("message" => "Artículo eliminado."));
-            } else {
-                http_response_code(503);
-                echo json_encode(array("message" => "No se pudo eliminar el artículo."));
-            }
-        } else {
-            http_response_code(400);
-            echo json_encode(array("message" => "Falta el ID del artículo en la URL."));
-        }
-        break;
-
-    // ===================================
-    // CASO 5: Otro método
-    // ===================================
-    default:
-        http_response_code(405); // Método No Permitido
-        echo json_encode(array("message" => "Método no permitido."));
-        break;
+  default:
+    http_response_code(405);
+    echo json_encode(["status" => "error", "message" => "Método no permitido."]);
+    break;
 }
 ?>

@@ -1,38 +1,25 @@
 <?php
-// Fichier: config/Database.php
-
+// config/Database.php
 class Database {
-    
-    // Ma3lomat dyal l-Database (Standard dyal XAMPP)
-    private $host = "localhost";
-    private $db_name = "mecalinks_db"; // Ism l-DB li 3ad saybti
-    private $username = "root";
-    private $password = "";
-    public $conn;
+    private $pdo;
 
-    // L-Method li katjib l-connexion
-    public function getConnection(){
-    
-        $this->conn = null; // Nbdaw b-connexion khawya
+    public function __construct() {
+        $host = getenv('DB_HOST') ?: 'localhost';
+        $db = getenv('DB_NAME') ?: 'mecalink';
+        $user = getenv('DB_USER') ?: 'root';
+        $pass = getenv('DB_PASS') ?: '';
 
         try {
-            // Ghadi n7awlo n-connectaw l-DB b-PDO
-            $this->conn = new PDO(
-                "mysql:host=" . $this->host . ";dbname=" . $this->db_name, 
-                $this->username, 
-                $this->password
-            );
-            
-            // N-setiw l-mode dyal l-errors bach ybiyn lina ayi mochkil
-            $this->conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-
-        } catch(PDOException $exception){
-            // Ila wqe3 chi mochkil (e.g., password ghalat, DB ma kaynach)
-            echo "Mochkil f-l-Connexion: " . $exception->getMessage();
+            $this->pdo = new PDO("mysql:host=$host;dbname=$db;charset=utf8", $user, $pass);
+            $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $this->pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            die("Error de conexión: " . $e->getMessage());  // En producción, loguea en lugar de mostrar
         }
+    }
 
-        // N-rj3o l-connexion l-li 3eyyet lina
-        return $this->conn;
+    public function getConnection() {
+        return $this->pdo;
     }
 }
 ?>
