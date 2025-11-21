@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS consultas (
     estado ENUM('pendiente', 'abierta', 'cerrada', 'resuelta') DEFAULT 'pendiente',
     fecha_publicacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    attachments JSON NULL COMMENT 'File paths for uploaded attachments (photos/videos)',
     FOREIGN KEY (id_usuario) REFERENCES usuarios(id_usuario) ON DELETE CASCADE,
     FOREIGN KEY (id_vehiculo) REFERENCES vehiculos(id_vehiculo) ON DELETE SET NULL
 );
@@ -67,6 +68,7 @@ CREATE TABLE IF NOT EXISTS respuestas (
     descripcion_respuesta TEXT NOT NULL,
     es_solucion BOOLEAN DEFAULT FALSE,
     fecha_respuesta TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    attachments JSON NULL COMMENT 'File paths for uploaded attachments (photos/PDFs/videos)',
     FOREIGN KEY (id_consulta) REFERENCES consultas(id_consulta) ON DELETE CASCADE,
     FOREIGN KEY (id_usuario) REFERENCES usuarios(id_usuario) ON DELETE CASCADE
 );

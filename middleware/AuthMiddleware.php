@@ -1,6 +1,7 @@
 <?php
 // middleware/AuthMiddleware.php
 use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 
 class AuthMiddleware {
     public function __invoke($request, $response, $next) {
@@ -9,7 +10,7 @@ class AuthMiddleware {
             return $response->withJson(['error' => 'Token requerido'], 401);
         }
         try {
-            $decoded = JWT::decode($matches[1], getenv('JWT_SECRET'), ['HS256']);
+            $decoded = JWT::decode($matches[1], new Key(getenv('JWT_SECRET'), 'HS256'));
             // Verificar si usuario existe y está activo
             $stmt = $pdo->prepare("SELECT id FROM usuarios WHERE id = ? AND active = 1");
             $stmt->execute([$decoded->user_id]);

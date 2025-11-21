@@ -7,21 +7,20 @@ include_once '../config/Database.php';
 require_once '../middleware/AuthMiddleware.php'; // ✅ التحقق الموحد من JWT
 
 // ✅ إعدادات CORS
-$allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'http://localhost:3002',
-  'http://localhost:3003',
-  'http://192.168.1.237:3000'
-];
-
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+$allowedOrigins = ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000', 'http://127.0.0.1:3001'];
+
 if (in_array($origin, $allowedOrigins)) {
-  header("Access-Control-Allow-Origin: $origin");
+    header("Access-Control-Allow-Origin: $origin");
+} else {
+    // For development, allow all localhost origins
+    if (strpos($origin, 'localhost') !== false || strpos($origin, '127.0.0.1') !== false) {
+        header("Access-Control-Allow-Origin: $origin");
+    }
 }
-header("Access-Control-Allow-Credentials: true");
-header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
+
+header("Access-Control-Allow-Headers: Content-Type, Authorization");
+header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
 header("Content-Type: application/json; charset=UTF-8");
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {

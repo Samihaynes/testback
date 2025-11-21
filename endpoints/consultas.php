@@ -70,10 +70,14 @@ $secretKey = "Samihaynesprohackersluxury@1996*";
 $method = $_SERVER['REQUEST_METHOD'];
 $id_consulta = $_GET['id_consulta'] ?? null;
 
-// Para POST pedimos token, GET es público
+// Para GET, token opcional para admin
 $usuarioToken = null;
-if ($method === 'POST') {
-  $usuarioToken = obtenerToken($secretKey);
+if ($method === 'GET') {
+  try {
+    $usuarioToken = obtenerToken($secretKey);
+  } catch (Exception $e) {
+    // Sin token, usuario anónimo
+  }
 }
 
 $db = (new Database())->getConnection();
@@ -170,10 +174,11 @@ switch ($method) {
   break;
 
   case 'POST':
-    $data = json_decode(file_get_contents("php://input"));
-    if (isset($data->checkVin) && !empty($data->vin)) {
-      // solo verificar VIN
-      $vinData = getVinDataFromAPI($data->vin);
+    $input = json_decode(file_get_contents('php://input'), true);
+
+    // Handle VIN check separately (JSON)
+    if (isset($input['checkVin']) && !empty($input['vin'])) {
+      $vinData = getVinDataFromAPI($input['vin']);
       if ($vinData) {
         http_response_code(200);
         echo json_encode($vinData);
@@ -184,8 +189,10 @@ switch ($method) {
       exit();
     }
 
-    if (!empty($data->titulo) && !empty($data->vin)) {
-      $vin = $data->vin;
+    // Handle consulta creation with attachments (multipart/form-data)
+    $usuarioToken = obtenerToken($secretKey);
+    if (!empty($_POST['titulo']) && !empty($_POST['vin'])) {
+      $vin = $_POST['vin'];
       $vehiculoData = getVinDataFromAPI($vin);
 
       if ($vehiculoData) {
@@ -212,17 +219,43 @@ switch ($method) {
           $id_vehiculo = $db->lastInsertId();
         }
 
+        // Handle file uploads for attachments
+        $uploadDir = "../uploads/";
+        if (!is_dir($uploadDir)) {
+          mkdir($uploadDir, 0777, true);
+        }
+        $attachments = [];
+        if (!empty($_FILES['attachments'])) {
+          $files = $_FILES['attachments'];
+          $fileCount = count($files['name']);
+          for ($i = 0; $i < $fileCount; $i++) {
+            if ($files['error'][$i] === UPLOAD_ERR_OK) {
+              $fileName = $files['name'][$i];
+              $fileTmp = $files['tmp_name'][$i];
+              $fileType = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+              $prefix = in_array($fileType, ['jpg', 'jpeg', 'png', 'gif', 'webp']) ? 'img_' : 'vid_';
+              $newFileName = time() . "_{$prefix}" . basename($fileName);
+              $filePath = $uploadDir . $newFileName;
+              if (move_uploaded_file($fileTmp, $filePath)) {
+                $attachments[] = $newFileName;
+              }
+            }
+          }
+        }
+        $attachmentsJson = !empty($attachments) ? json_encode($attachments) : null;
+
         // insertar consulta
-        $descripcion = $data->descripcion ?? '';
-        $categoria = $data->categoria ?? '';
-        $query_consulta = "INSERT INTO consultas (id_usuario, id_vehiculo, titulo, descripcion, categoria, estado)
-                           VALUES (:id_usuario, :id_vehiculo, :titulo, :descripcion, :categoria, 'pendiente')";
+        $descripcion = $_POST['descripcion'] ?? '';
+        $categoria = $_POST['categoria'] ?? '';
+        $query_consulta = "INSERT INTO consultas (id_usuario, id_vehiculo, titulo, descripcion, categoria, estado, attachments)
+                           VALUES (:id_usuario, :id_vehiculo, :titulo, :descripcion, :categoria, 'pendiente', :attachments)";
         $stmt_consulta = $db->prepare($query_consulta);
         $stmt_consulta->bindParam(':id_usuario', $usuarioToken->id);
         $stmt_consulta->bindParam(':id_vehiculo', $id_vehiculo);
-        $stmt_consulta->bindParam(':titulo', $data->titulo);
+        $stmt_consulta->bindParam(':titulo', $_POST['titulo']);
         $stmt_consulta->bindParam(':descripcion', $descripcion);
         $stmt_consulta->bindParam(':categoria', $categoria);
+        $stmt_consulta->bindParam(':attachments', $attachmentsJson);
 
         if ($stmt_consulta->execute()) {
           http_response_code(201);
