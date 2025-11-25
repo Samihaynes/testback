@@ -125,19 +125,20 @@ switch ($method) {
   case 'GET':
   try {
     // 1) Base query always initialized
-    $query = "
-      SELECT
-        c.id_consulta,
-        c.titulo,
-        c.estado,
-        c.fecha_publicacion,
-        u.nombre_usuario,
-        v.marca, v.modelo, v.motor
-      FROM consultas c
-      LEFT JOIN usuarios u ON c.id_usuario = u.id_usuario
-      LEFT JOIN vehiculos v ON c.id_vehiculo = v.id_vehiculo
-    ";
-
+  $query = "
+  SELECT
+    c.id_consulta,
+    c.titulo,
+    c.descripcion,  /* 🛑 AÑADIDO: Incluir el campo descripcion */
+    c.estado,
+    c.fecha_publicacion,
+    u.nombre_usuario,
+    v.marca, v.modelo, v.motor,
+    c.attachments
+  FROM consultas c
+  LEFT JOIN usuarios u ON c.id_usuario = u.id_usuario
+  LEFT JOIN vehiculos v ON c.id_vehiculo = v.id_vehiculo
+";
     // 2) Default: hide 'pendiente' for everyone without admin role (including anonymous)
     $conditions = [];
     $params = [];

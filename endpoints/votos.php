@@ -2,13 +2,15 @@
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 
+// Cargar dependencias de Composer (incluyendo Firebase/PHP-JWT)
 require_once '../vendor/autoload.php';
 include_once '../config/Database.php';
-require_once '../middleware/AuthMiddleware.php'; // ✅ استدعاء التحقق الموحد
+// Nota: AuthMiddleware y NotificationUtils deben estar configurados en el sistema
+require_once '../middleware/AuthMiddleware.php'; 
 require_once '../utils/NotificationUtils.php';
 
 // =======================
-// 🔧 Configuración CORS
+// 🔧 Configuración CORS UNIFICADA
 // =======================
 $allowedOrigins = [
   'http://localhost:3000',
@@ -27,44 +29,45 @@ if (in_array($origin, $allowedOrigins)) {
   header("Access-Control-Allow-Origin: $origin");
 } else {
   // Para desarrollo, permitir cualquier origen localhost
-  if (strpos($origin, 'localhost') !== false || strpos($origin, '127.0.0.1') !== false) {
+  if (strpos($origin, 'localhost') !== false || strpos( $origin, '127.0.0.1') !== false) {
     header("Access-Control-Allow-Origin: $origin");
   }
 }
+
+// Configuración de métodos permitidos
 header("Content-Type: application/json; charset=UTF-8");
-header("Access-Control-Allow-Methods: POST, OPTIONS");
+header("Access-Control-Allow-Methods: POST, OPTIONS"); // Solo permitimos POST para votar
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Max-Age: 3600");
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-  http_response_code(200);
-  exit();
-}
-header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
-header("Content-Type: application/json; charset=UTF-8");
-
+// Manejar la petición OPTIONS (preflight request)
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
   http_response_code(200);
   exit();
 }
 
-// ✅ التحقق من التوكن
+// =======================
+// ✅ Función de Verificación JWT (Autenticación)
+// =======================
 function obtenerToken($secretKey) {
   $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
   if (!$authHeader) {
     $headers = getallheaders();
     $authHeader = $headers['Authorization'] ?? '';
   }
+  // Verificar formato 'Bearer <token>'
   if (!$authHeader || !str_starts_with($authHeader, 'Bearer ')) {
     http_response_code(401);
     echo json_encode(["status" => "error", "message" => "Token no proporcionado"]);
     exit();
   }
   $jwt = str_replace('Bearer ', '', $authHeader);
+  
+  // Decodificar y validar el token
   try {
     $decoded = JWT::decode($jwt, new Key($secretKey, 'HS256'));
-    return $decoded->data;
+    return $decoded->data; // Devolver los datos del usuario (id, rol, email)
   } catch (Exception $e) {
     http_response_code(401);
     echo json_encode(["status" => "error", "message" => "Token inválido"]);
@@ -73,20 +76,26 @@ function obtenerToken($secretKey) {
 }
 
 $secretKey = "Samihaynesprohackersluxury@1996*";
-$usuarioToken = obtenerToken($secretKey);
+// Llamar a la función para obtener y validar el token del usuario logueado
+$usuarioToken = obtenerToken($secretKey); 
 
-// ✅ التحقق من نوع الطلب
+// =======================
+// ✅ Lógica de Votación (POST)
+// =======================
+
+// Verificar que el método sea POST (único permitido para esta ruta)
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
   http_response_code(405);
   echo json_encode(["message" => "Método no permitido."]);
   exit();
 }
 
-// ✅ الاتصال بقاعدة البيانات
+// Conexión a la base de datos
 $db = (new Database())->getConnection();
+// Leer datos del cuerpo de la petición (JSON)
 $data = json_decode(file_get_contents("php://input"));
 
-// ✅ التحقق من البيانات
+// Validar que los datos necesarios existan
 if (
   !empty($data->id_respuesta) &&
   !empty($data->tipo_voto) &&
@@ -96,7 +105,7 @@ if (
     $fecha_voto = date('Y-m-d H:i:s');
     $id_usuario = $usuarioToken->id;
 
-    // ✅ إدراج أو تحديث التصويت
+    // Insertar o actualizar el voto. Si el usuario ya votó (clave duplicada), se actualiza el tipo_voto.
     $query = "INSERT INTO votos (id_respuesta, id_usuario, tipo_voto, fecha_voto)
               VALUES (:id_respuesta, :id_usuario, :tipo_voto, :fecha_voto)
               ON DUPLICATE KEY UPDATE
@@ -111,8 +120,10 @@ if (
     $stmt->bindParam(':tipo_voto_update', $data->tipo_voto);
     $stmt->bindParam(':fecha_voto_update', $fecha_voto);
     $stmt->execute();
-
-    // ✅ حساب عدد التصويتات
+    
+    // Aquí se debería llamar a NotificationUtils::crearNotificacion si el voto es UP
+    
+    // Consultar el recuento actual de votos para devolver la respuesta al cliente
     $countQuery = "SELECT
                       SUM(tipo_voto = 'up') AS likes,
                       SUM(tipo_voto = 'down') AS dislikes
@@ -124,7 +135,7 @@ if (
     $countStmt->execute();
     $result = $countStmt->fetch(PDO::FETCH_ASSOC);
 
-    http_response_code(201);
+    http_response_code(201); // Created
     echo json_encode([
       "status" => "success",
       "message" => "Voto registrado/actualizado exitosamente.",
@@ -139,7 +150,7 @@ if (
     ]);
   }
 } else {
-  http_response_code(400);
+  http_response_code(400); // Bad Request
   echo json_encode([
     "status" => "error",
     "message" => "Datos incompletos o tipo_voto inválido."

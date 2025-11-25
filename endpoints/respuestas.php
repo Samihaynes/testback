@@ -88,55 +88,82 @@ switch ($method) {
 
   case 'POST':
     // Check if it's multipart/form-data (file upload)
-    if (isset($_FILES['attachments'])) {
-      // Handle multipart form data
-      $id_consulta = $_POST['id_consulta'] ?? '';
-      $contenido = $_POST['contenido'] ?? '';
+    $esMultipart = isset($_FILES['attachments']) && !empty($_FILES['attachments']['name'][0]);
+
+    if ($esMultipart) {
+        // Handle multipart form data
+        $id_consulta = $_POST['id_consulta'] ?? '';
+        $contenido = $_POST['contenido'] ?? '';
     } else {
-      // Handle JSON data
-      $id_consulta = $data->id_consulta ?? '';
-      $contenido = $data->contenido ?? '';
+        // Handle JSON data
+        $data = json_decode(file_get_contents("php://input"));
+        $id_consulta = $data->id_consulta ?? '';
+        $contenido = $data->contenido ?? '';
     }
 
     if (!empty($id_consulta) && !empty($contenido) && trim($contenido) !== '') {
-      // Handle file uploads
-      $attachments_paths = [];
-      if (isset($_FILES['attachments'])) {
-        $upload_dir = '../uploads/respuestas/';
-        if (!is_dir($upload_dir)) {
-          mkdir($upload_dir, 0777, true);
-        }
-        foreach ($_FILES['attachments']['tmp_name'] as $key => $tmp_name) {
-          $file_name = $_FILES['attachments']['name'][$key];
-          $file_tmp = $_FILES['attachments']['tmp_name'][$key];
-          $file_path = $upload_dir . uniqid() . '_' . $file_name;
-          if (move_uploaded_file($file_tmp, $file_path)) {
-            $attachments_paths[] = $file_path;
-          }
-        }
-      }
+        
+        // 1. Manejo y Subida de Archivos
+        $attachments_paths = [];
+        if ($esMultipart) {
+            // La carpeta 'uploads/respuestas' está en el nivel superior a 'endpoints'
+            $relative_upload_dir = 'uploads/respuestas/'; 
+            $full_upload_dir = '../' . $relative_upload_dir; 
 
-      $attachments_json = json_encode($attachments_paths);
-      $query = "INSERT INTO respuestas (id_consulta, id_usuario, contenido, fecha_respuesta, attachments)
-                VALUES (:id_consulta, :id_usuario, :contenido, NOW(), :attachments)";
-      $stmt = $db->prepare($query);
-      $stmt->bindParam(':id_consulta', $id_consulta);
-      $stmt->bindParam(':id_usuario', $usuarioToken->id);
-      $stmt->bindParam(':contenido', $contenido);
-      $stmt->bindParam(':attachments', $attachments_json);
+            if (!is_dir($full_upload_dir)) {
+                mkdir($full_upload_dir, 0777, true);
+            }
 
-      if ($stmt->execute()) {
-        http_response_code(201);
-        echo json_encode(["status" => "success", "message" => "Respuesta publicada."]);
-      } else {
-        http_response_code(500);
-        echo json_encode(["status" => "error", "message" => "No se pudo guardar la respuesta."]);
-      }
+            // Recorrer los archivos subidos
+            foreach ($_FILES['attachments']['tmp_name'] as $key => $tmp_name) {
+                // Verificar si hubo un archivo subido para ese índice y si no hubo error
+                if ($_FILES['attachments']['error'][$key] === UPLOAD_ERR_OK && !empty($tmp_name)) {
+                    $file_name = basename($_FILES['attachments']['name'][$key]);
+                    $new_file_name = uniqid() . '_' . $file_name;
+                    $new_file_path = $relative_upload_dir . $new_file_name;
+
+                    // Movemos el archivo del temporal al directorio de uploads (usando la ruta completa)
+                    if (move_uploaded_file($tmp_name, '../' . $new_file_path)) {
+                        // Almacenamos la ruta relativa para la base de datos
+                        $attachments_paths[] = $new_file_path; 
+                    }
+                }
+            }
+        }
+        
+        // 2. CORRECCIÓN CLAVE: Determinar el valor JSON o NULL
+        if (!empty($attachments_paths)) {
+            // Si hay rutas, codificamos el JSON
+            $attachments_json = json_encode($attachments_paths);
+        } else {
+            // Si no hay archivos, asignamos NULL para la DB
+            $attachments_json = NULL; 
+        }
+
+        // 3. Inserción en la DB
+        $query = "INSERT INTO respuestas (id_consulta, id_usuario, descripcion_respuesta, attachments, fecha_respuesta)
+                  VALUES (:id_consulta, :id_usuario, :contenido, :attachments, NOW())";
+        $stmt = $db->prepare($query);
+        $stmt->bindParam(':id_consulta', $id_consulta);
+        $stmt->bindParam(':id_usuario', $usuarioToken->id);
+        $stmt->bindParam(':contenido', $contenido);
+        // CRÍTICO: El bind debe permitir NULL si $attachments_json es NULL
+        $stmt->bindParam(':attachments', $attachments_json, $attachments_json === NULL ? PDO::PARAM_NULL : PDO::PARAM_STR);
+
+        if ($stmt->execute()) {
+            http_response_code(201);
+            echo json_encode(["status" => "success", "message" => "Respuesta publicada."]);
+        } else {
+            http_response_code(500);
+            echo json_encode(["status" => "error", "message" => "No se pudo guardar la respuesta en la DB."]);
+        }
     } else {
-      http_response_code(400);
-      echo json_encode(["status" => "error", "message" => "Datos incompletos."]);
+        http_response_code(400);
+        echo json_encode(["status" => "error", "message" => "Datos incompletos."]);
     }
     break;
+
+// ... el resto de los casos (GET, PUT, DELETE) permanecen igual
 
   case 'PUT':
     if ($id_respuesta && isset($data->contenido) && trim($data->contenido) !== '') {
