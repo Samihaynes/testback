@@ -5,7 +5,7 @@ use Firebase\JWT\Key;
 require_once '../vendor/autoload.php';
 include_once '../config/Database.php';
 require_once '../middleware/AuthMiddleware.php'; // ✅ التحقق الموحد من JWT
-
+require_once '../utils/NotificationUtils.php';
 // ✅ إعدادات CORS
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 $allowedOrigins = ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000', 'http://127.0.0.1:3001'];
@@ -100,6 +100,20 @@ switch ($method) {
         http_response_code(500);
         echo json_encode(["status" => "error", "message" => "❌ No se pudo guardar el comentario."]);
       }
+      // 1. Obtener ID del administrador/autor del artículo (Receptor)
+$queryAutor = "SELECT id_admin FROM articulos WHERE id_articulo = :id_articulo";
+$stmtAutor = $db->prepare($queryAutor);
+$stmtAutor->bindParam(':id_articulo', $data->id_articulo);
+$stmtAutor->execute();
+$id_autor_articulo = $stmtAutor->fetchColumn();
+
+// 2. Notificar al autor del artículo (solo si no es el mismo que comenta)
+if ($id_autor_articulo && $id_autor_articulo != $usuarioToken->id) {
+    
+    $notifier = new NotificationUtils($db);
+    $mensaje = "Tu artículo ha recibido un nuevo comentario.";
+    $notifier->crearNotificacion($id_autor_articulo, $mensaje, 'comentario'); 
+}
     } else {
       http_response_code(400);
       echo json_encode(["status" => "error", "message" => "Datos incompletos."]);

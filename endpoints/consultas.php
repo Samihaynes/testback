@@ -124,40 +124,52 @@ function getVinDataFromAPI($vin) {
 switch ($method) {
   case 'GET':
   try {
-    // 1) Base query always initialized
-  $query = "
-  SELECT
-    c.id_consulta,
-    c.titulo,
-    c.descripcion,  /* 🛑 AÑADIDO: Incluir el campo descripcion */
-    c.estado,
-    c.fecha_publicacion,
-    u.nombre_usuario,
-    v.marca, v.modelo, v.motor,
-    c.attachments
-  FROM consultas c
-  LEFT JOIN usuarios u ON c.id_usuario = u.id_usuario
-  LEFT JOIN vehiculos v ON c.id_vehiculo = v.id_vehiculo
-";
-    // 2) Default: hide 'pendiente' for everyone without admin role (including anonymous)
+    // 1) Base query
+    $query = "
+      SELECT
+        c.id_consulta,
+        c.titulo,
+        c.descripcion,
+        c.categoria, /* Asegúrate de pedir categoria */
+        c.estado,
+        c.fecha_publicacion,
+        u.nombre_usuario,
+        v.vin, v.marca, v.modelo, v.ano, v.motor,
+        c.attachments
+      FROM consultas c
+      LEFT JOIN usuarios u ON c.id_usuario = u.id_usuario
+      LEFT JOIN vehiculos v ON c.id_vehiculo = v.id_vehiculo
+    ";
+
+    // 2) Filtros dinámicos
     $conditions = [];
     $params = [];
 
-    // If user is not admin (or no token), hide pending
-    if (!isset($usuarioToken) || !isset($usuarioToken->rol) || $usuarioToken->rol !== 'admin') {
-      $conditions[] = "c.estado != :pendiente";
-      $params[':pendiente'] = 'pendiente';
+    // 🛑 CORRECCIÓN CRÍTICA: Si hay ID en la URL, filtrar por él
+    if ($id_consulta) {
+        $conditions[] = "c.id_consulta = :id_consulta";
+        $params[':id_consulta'] = $id_consulta;
     }
 
-    // 3) Apply conditions
+    // Filtro de estado (si no es admin)
+    if (!isset($usuarioToken) || !isset($usuarioToken->rol) || $usuarioToken->rol !== 'admin') {
+      // Si pedimos una consulta específica, permitimos verla aunque esté pendiente (opcional)
+      // Pero para la lista general, ocultamos pendientes.
+      if (!$id_consulta) { 
+          $conditions[] = "c.estado != :pendiente";
+          $params[':pendiente'] = 'pendiente';
+      }
+    }
+
+    // 3) Aplicar condiciones WHERE
     if (!empty($conditions)) {
       $query .= " WHERE " . implode(" AND ", $conditions);
     }
 
-    // 4) Order by newest first
+    // 4) Ordenar
     $query .= " ORDER BY c.fecha_publicacion DESC";
 
-    // 5) Prepare/execute
+    // 5) Ejecutar
     $stmt = $db->prepare($query);
     foreach ($params as $k => $v) {
       $stmt->bindValue($k, $v);
@@ -165,12 +177,19 @@ switch ($method) {
     $stmt->execute();
 
     $consultas = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    http_response_code(200);
-    echo json_encode($consultas);
+    
+    // Si pedimos por ID y no hay resultados, devolver 404
+    if ($id_consulta && empty($consultas)) {
+        http_response_code(404);
+        echo json_encode(["message" => "Consulta no encontrada"]);
+    } else {
+        http_response_code(200);
+        echo json_encode($consultas);
+    }
 
   } catch (PDOException $e) {
     http_response_code(500);
-    echo json_encode(["message" => "Erreur de base de données: " . $e->getMessage()]);
+    echo json_encode(["message" => "Error DB: " . $e->getMessage()]);
   }
   break;
 

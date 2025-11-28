@@ -20,16 +20,16 @@ include_once '../config/Database.php';
 $database = new Database();
 $db = $database->getConnection();
 
-// 1. قراءة البيانات القادمة من React
+//leer datos  
 $data = json_decode(file_get_contents("php://input"));
 
-// 2. التحقق من الحقول الأساسية
+//confermar datos obligatorios 
 if (
 
     !empty($data->password) &&
     !empty($data->email)
 ) {
-    // 3. التحقق من عدم وجود المستخدم مسبقاً
+//reverificar si el usuario o email ya existen
     $checkQuery = "SELECT id_usuario FROM usuarios WHERE nombre_usuario = :usuario OR email = :email";
     $checkStmt = $db->prepare($checkQuery);
     $checkStmt->bindParam(':usuario', $data->nombre_usuario);
@@ -42,10 +42,10 @@ if (
         exit();
     }
 
-    // 4. تشفير كلمة المرور
+    //password hashing
     $hashedPassword = password_hash($data->password, PASSWORD_DEFAULT);
 
-    // 5. إدخال البيانات في قاعدة البيانات
+   //insertar usuario 
     $query = "INSERT INTO usuarios (
         nombre_usuario, email, password_hash, rol,
         nombre, apellido, telefono, pais, ciudad

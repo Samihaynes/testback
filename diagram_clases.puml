@@ -1,0 +1,38 @@
+@startuml Diagrama de Clases UML - MecaLink
+
+class Database {
+    - $pdo : PDO
+    + __construct()
+    + getConnection() : PDO
+}
+
+class AuthController {
+    + register($data) : array
+}
+
+class PostController {
+    + createPost($data, $userId) : array
+}
+
+class AuthMiddleware {
+    + __invoke($request, $response, $next)
+}
+
+class NotificationUtils {
+    - $db : PDO
+    + __construct(PDO $db)
+    + crearNotificacion($id_usuario_destino, $mensaje, $tipo) : bool
+}
+
+class VinService {
+    + getVehicleData($vin) : array
+}
+
+' Relaciones
+AuthController --> Database : usa
+PostController --> Database : usa
+PostController --> VinService : usa
+NotificationUtils --> Database : dependencia
+AuthMiddleware --> Database : usa (inferred)
+
+@enduml

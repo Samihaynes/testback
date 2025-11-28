@@ -9,27 +9,20 @@ class NotificationUtils {
         $this->db = $db;
     }
 
-    /**
-     * Crea una nueva notificación en la tabla 'notificaciones'.
-     * @param int $id_usuario_destino ID del usuario que recibirá la notificación.
-     * @param string $mensaje Mensaje de la notificación.
-     * @param string $tipo Tipo de notificación (ej: 'voto', 'respuesta').
-     */
-    public function crearNotificacion($id_usuario_destino, $mensaje, $tipo = 'general') {
-        // Lógica de inserción en la tabla 'notificaciones'
-        $query = "INSERT INTO notificaciones (id_usuario, mensaje, tipo, fecha) 
-                  VALUES (:id_usuario, :mensaje, :tipo, NOW())";
+    // Añadimos el parámetro $id_item (el ID de la consulta)
+    public function crearNotificacion($id_usuario_destino, $mensaje, $tipo = 'general', $id_item = null) {
+        $query = "INSERT INTO notificaciones (id_usuario, mensaje, tipo, id_item, fecha) 
+                  VALUES (:id_usuario, :mensaje, :tipo, :id_item, NOW())";
         $stmt = $this->db->prepare($query);
         $stmt->bindParam(':id_usuario', $id_usuario_destino);
         $stmt->bindParam(':mensaje', $mensaje);
         $stmt->bindParam(':tipo', $tipo);
+        $stmt->bindParam(':id_item', $id_item); // Guardamos el ID para el enlace
         
         try {
             $stmt->execute();
             return true;
         } catch (PDOException $e) {
-            // Manejar error silenciosamente o loguear
-            error_log("Error al crear notificación: " . $e->getMessage());
             return false;
         }
     }

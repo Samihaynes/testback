@@ -80,6 +80,17 @@ $stmt->execute();
 
 $notificaciones = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+// --- DEBUGGING CRÍTICO ---
+if (empty($notificaciones)) {
+    // Si la BD devuelve vacío, al menos que veamos que el JSON está correcto
+    $response_data = ["status" => "success", "data" => []];
+} else {
+    $response_data = ["status" => "success", "data" => $notificaciones];
+}
+
 http_response_code(200);
-echo json_encode($notificaciones);
+// **AÑADIR ESTO:** Esto forzará una salida si el código llega aquí.
+// echo "DEBUG: Llegó al final."; // <- Quitar esta línea después del test
+echo json_encode($response_data);
+exit();
 ?>

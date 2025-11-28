@@ -4,7 +4,7 @@ use Firebase\JWT\Key;
 
 require_once '../vendor/autoload.php';
 include_once '../config/Database.php';
-
+require_once '../utils/NotificationUtils.php';
 // ✅ إعدادات CORS
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 $allowedOrigins = ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000', 'http://127.0.0.1:3001'];
@@ -68,11 +68,19 @@ $id_consulta = $_GET['id_consulta'] ?? null;
 switch ($method) {
   case 'GET':
     if ($id_consulta) {
-      $query = "SELECT r.*, u.nombre_usuario AS nombre_usuario
-                FROM respuestas r
-                JOIN usuarios u ON r.id_usuario = u.id_usuario
-                WHERE r.id_consulta = :id_consulta
-                ORDER BY r.fecha_respuesta DESC";
+      $query = "
+    SELECT 
+        r.*, 
+        u.nombre_usuario AS nombre_usuario,
+        COALESCE(SUM(v.tipo_voto = 'up'), 0) AS votos_up,
+        COALESCE(SUM(v.tipo_voto = 'down'), 0) AS votos_down
+    FROM respuestas r
+    JOIN usuarios u ON r.id_usuario = u.id_usuario
+    LEFT JOIN votos v ON r.id_respuesta = v.id_respuesta -- Unir la tabla votos
+    WHERE r.id_consulta = :id_consulta
+    GROUP BY r.id_respuesta -- Agrupar por respuesta para el cálculo SUM
+    ORDER BY r.fecha_respuesta DESC
+";
       $stmt = $db->prepare($query);
       $stmt->bindParam(':id_consulta', $id_consulta);
       $stmt->execute();
@@ -87,26 +95,31 @@ switch ($method) {
     break;
 
   case 'POST':
+    // === 1. MANEJO DE LA ENTRADA DE DATOS (JSON vs. MULTIPART) ===
     // Check if it's multipart/form-data (file upload)
     $esMultipart = isset($_FILES['attachments']) && !empty($_FILES['attachments']['name'][0]);
 
     if ($esMultipart) {
-        // Handle multipart form data
-        $id_consulta = $_POST['id_consulta'] ?? '';
-        $contenido = $_POST['contenido'] ?? '';
+        // Handle multipart form data (POST variables)
+        $id_consulta = $_POST['id_consulta'] ?? null;
+        $contenido = $_POST['contenido'] ?? null;
+        // Nota: Si es multipart, asumimos que id_usuario viene del token.
     } else {
-        // Handle JSON data
+        // Handle JSON data (Petición sin archivos)
         $data = json_decode(file_get_contents("php://input"));
-        $id_consulta = $data->id_consulta ?? '';
-        $contenido = $data->contenido ?? '';
+        $id_consulta = $data->id_consulta ?? null;
+        $contenido = $data->contenido ?? null;
     }
+    
+    // Convertir a entero (seguridad)
+    $id_consulta = intval($id_consulta); 
 
+    // === 2. VALIDACIÓN ===
     if (!empty($id_consulta) && !empty($contenido) && trim($contenido) !== '') {
         
-        // 1. Manejo y Subida de Archivos
+        // 3. Manejo y Subida de Archivos
         $attachments_paths = [];
         if ($esMultipart) {
-            // La carpeta 'uploads/respuestas' está en el nivel superior a 'endpoints'
             $relative_upload_dir = 'uploads/respuestas/'; 
             $full_upload_dir = '../' . $relative_upload_dir; 
 
@@ -114,43 +127,57 @@ switch ($method) {
                 mkdir($full_upload_dir, 0777, true);
             }
 
-            // Recorrer los archivos subidos
+            // Recorrer los archivos subidos (El resto del bucle es correcto)
             foreach ($_FILES['attachments']['tmp_name'] as $key => $tmp_name) {
-                // Verificar si hubo un archivo subido para ese índice y si no hubo error
                 if ($_FILES['attachments']['error'][$key] === UPLOAD_ERR_OK && !empty($tmp_name)) {
                     $file_name = basename($_FILES['attachments']['name'][$key]);
                     $new_file_name = uniqid() . '_' . $file_name;
                     $new_file_path = $relative_upload_dir . $new_file_name;
 
-                    // Movemos el archivo del temporal al directorio de uploads (usando la ruta completa)
                     if (move_uploaded_file($tmp_name, '../' . $new_file_path)) {
-                        // Almacenamos la ruta relativa para la base de datos
                         $attachments_paths[] = $new_file_path; 
                     }
                 }
             }
         }
         
-        // 2. CORRECCIÓN CLAVE: Determinar el valor JSON o NULL
+        // 4. Determinar el valor JSON o NULL
         if (!empty($attachments_paths)) {
-            // Si hay rutas, codificamos el JSON
             $attachments_json = json_encode($attachments_paths);
         } else {
-            // Si no hay archivos, asignamos NULL para la DB
+            // Asignamos NULL si no hay archivos (correcta gestión de la BD)
             $attachments_json = NULL; 
         }
 
-        // 3. Inserción en la DB
+        // 5. Inserción en la DB
         $query = "INSERT INTO respuestas (id_consulta, id_usuario, descripcion_respuesta, attachments, fecha_respuesta)
                   VALUES (:id_consulta, :id_usuario, :contenido, :attachments, NOW())";
         $stmt = $db->prepare($query);
-        $stmt->bindParam(':id_consulta', $id_consulta);
-        $stmt->bindParam(':id_usuario', $usuarioToken->id);
+        $stmt->bindParam(':id_consulta', $id_consulta, PDO::PARAM_INT); // USAR PARAM_INT
+        $stmt->bindParam(':id_usuario', $usuarioToken->id, PDO::PARAM_INT);
         $stmt->bindParam(':contenido', $contenido);
-        // CRÍTICO: El bind debe permitir NULL si $attachments_json es NULL
         $stmt->bindParam(':attachments', $attachments_json, $attachments_json === NULL ? PDO::PARAM_NULL : PDO::PARAM_STR);
 
         if ($stmt->execute()) {
+            
+            // === LOGIQUE DE NOTIFICATION ===
+            // 1. Obtener ID del autor de la consulta (Receptor)
+            $queryAutor = "SELECT id_usuario, titulo FROM consultas WHERE id_consulta = :id_consulta";
+            $stmtAutor = $db->prepare($queryAutor);
+            $stmtAutor->bindParam(':id_consulta', $id_consulta, PDO::PARAM_INT);
+            $stmtAutor->execute();
+            $consultaInfo = $stmtAutor->fetch(PDO::FETCH_ASSOC);
+
+            $id_autor_consulta = $consultaInfo['id_usuario'] ?? null;
+            $titulo_consulta = $consultaInfo['titulo'] ?? 'la consulta';
+
+            // 2. Crear y enviar la notificación
+            if ($id_autor_consulta && $id_autor_consulta != $usuarioToken->id) { 
+                $notifier = new NotificationUtils($db);
+                $mensaje = "Tu consulta '{$titulo_consulta}' ha recibido una nueva respuesta.";
+                $notifier->crearNotificacion($id_autor_consulta, $mensaje, 'respuesta',$id_consulta); 
+            }
+
             http_response_code(201);
             echo json_encode(["status" => "success", "message" => "Respuesta publicada."]);
         } else {
@@ -162,7 +189,6 @@ switch ($method) {
         echo json_encode(["status" => "error", "message" => "Datos incompletos."]);
     }
     break;
-
 // ... el resto de los casos (GET, PUT, DELETE) permanecen igual
 
   case 'PUT':
